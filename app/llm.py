@@ -12,6 +12,7 @@ tagged with the current prompt version (config.PROMPT_VERSION).
 """
 import hashlib
 import json
+import re
 from typing import Protocol
 
 from . import config
@@ -30,8 +31,19 @@ def _stable_bucket(text: str, mod: int) -> int:
     return int(digest, 16) % mod
 
 
+_FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL)
+
+
 def _parse(raw: str) -> dict:
-    """Turn the model's raw text reply into a dict."""
+    """Turn the model's raw text reply into a dict.
+
+    Real models sometimes wrap the JSON in a markdown code fence (optionally
+    preceded/followed by prose) instead of returning bare JSON; strip the
+    fence and use its contents if present.
+    """
+    match = _FENCE_RE.search(raw)
+    if match:
+        raw = match.group(1)
     return json.loads(raw)
 
 
