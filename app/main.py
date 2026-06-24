@@ -52,27 +52,39 @@ async def health() -> dict:
     return {"status": "ok"}
 
 
+# ADDED: new helper function extracted so both /summarize and /batch can share
+# the same logic (rate limit, cache, LLM call) instead of duplicating it.
 async def _summarize_one(
     text: str, style: str, force_refresh: bool, api_key: str
 ) -> SummarizeResponse:
+    # MOVED: rate limit check, moved here from the /summarize endpoint so it
+    # also applies per-ticket when called from /batch.
     if not _limiter.allow(api_key):
         raise HTTPException(status_code=429, detail="Rate limit exceeded")
 
+    # FIXED: force_refresh was previously ignored with just a TODO comment.
     if not force_refresh:
+        # FIXED: cache.get() now passes style and PROMPT_VERSION, previously
+        # only passed text.
         cached = _cache.get(text, style, config.PROMPT_VERSION)
         if cached is not None:
             return SummarizeResponse(
                 summary=cached["summary"],
+                # FIXED: was cached["points"] before, wrong key caused
+                # KeyError crash.
                 key_points=cached["key_points"],
                 sentiment=cached["sentiment"],
                 cached=True,
             )
 
     result = await _call_llm_with_retries(text, style)
+    # FIXED: cache.set() now passes style and PROMPT_VERSION, previously only
+    # passed text.
     _cache.set(text, style, config.PROMPT_VERSION, result)
 
     return SummarizeResponse(
         summary=result["summary"],
+        # FIXED: was result["points"] before, wrong key caused KeyError crash.
         key_points=result["key_points"],
         sentiment=result["sentiment"],
         cached=False,
@@ -84,9 +96,12 @@ async def summarize(
     req: SummarizeRequest,
     api_key: str = Depends(require_api_key),
 ) -> SummarizeResponse:
+    # CHANGED: previously had all logic inline, now delegates to shared helper.
     return await _summarize_one(req.text, req.style, req.force_refresh, api_key)
 
 
+# ADDED: whole implementation, was previously a stub that just raised
+# HTTPException 501.
 @app.post("/batch", response_model=BatchResponse)
 async def batch(
     req: BatchRequest,
@@ -98,9 +113,12 @@ async def batch(
     # without aborting the rest of the batch.
     results: list[BatchItemResult] = []
     for index, text in enumerate(req.texts):
+        # ADDED: try/except block, partial failure handling so one bad
+        # ticket does not abort the whole batch.
         try:
             summary = await _summarize_one(text, "brief", False, api_key)
             results.append(BatchItemResult(index=index, ok=True, result=summary))
+        # ADDED: except line, catches rate limit and LLM errors per ticket.
         except HTTPException as exc:
             results.append(BatchItemResult(index=index, ok=False, error=str(exc.detail)))
 
