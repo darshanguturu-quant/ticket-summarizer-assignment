@@ -3,7 +3,7 @@
 Endpoints:
   GET  /health              liveness check
   POST /summarize           summarize one ticket   (auth + cache + rate limit)
-  POST /batch               summarize many tickets  (UNFINISHED — see README)
+  POST /batch               summarize many tickets   (auth + cache + per-ticket rate limit)
 
 Auth: send header `X-API-Key: demo-key-alice` (or demo-key-bob).
 """
@@ -15,6 +15,7 @@ from . import config
 from .cache import ResponseCache
 from .llm import get_provider
 from .models import (
+    BatchItemResult,
     BatchRequest,
     BatchResponse,
     SummarizeRequest,
@@ -51,16 +52,14 @@ async def health() -> dict:
     return {"status": "ok"}
 
 
-@app.post("/summarize", response_model=SummarizeResponse)
-async def summarize(
-    req: SummarizeRequest,
-    api_key: str = Depends(require_api_key),
+async def _summarize_one(
+    text: str, style: str, force_refresh: bool, api_key: str
 ) -> SummarizeResponse:
     if not _limiter.allow(api_key):
         raise HTTPException(status_code=429, detail="Rate limit exceeded")
 
-    if not req.force_refresh:
-        cached = _cache.get(req.text, req.style, config.PROMPT_VERSION)
+    if not force_refresh:
+        cached = _cache.get(text, style, config.PROMPT_VERSION)
         if cached is not None:
             return SummarizeResponse(
                 summary=cached["summary"],
@@ -69,8 +68,8 @@ async def summarize(
                 cached=True,
             )
 
-    result = await _call_llm_with_retries(req.text, req.style)
-    _cache.set(req.text, req.style, config.PROMPT_VERSION, result)
+    result = await _call_llm_with_retries(text, style)
+    _cache.set(text, style, config.PROMPT_VERSION, result)
 
     return SummarizeResponse(
         summary=result["summary"],
@@ -80,17 +79,29 @@ async def summarize(
     )
 
 
+@app.post("/summarize", response_model=SummarizeResponse)
+async def summarize(
+    req: SummarizeRequest,
+    api_key: str = Depends(require_api_key),
+) -> SummarizeResponse:
+    return await _summarize_one(req.text, req.style, req.force_refresh, api_key)
+
+
 @app.post("/batch", response_model=BatchResponse)
 async def batch(
     req: BatchRequest,
     api_key: str = Depends(require_api_key),
 ) -> BatchResponse:
-    # TODO(candidate, Part 2): implement batch summarization.
-    #
-    # Expected behaviour (see README "Part 2"):
-    #   - Summarize every ticket in req.texts.
-    #   - Reuse the existing cache and rate limiter rather than bypassing them.
-    #   - Partial failure must not sink the whole batch: if one ticket fails,
-    #     return its error in that item and still return results for the rest.
-    #   - Preserve input order in the response (use BatchItemResult.index).
-    raise HTTPException(status_code=501, detail="Not implemented")
+    # Each ticket goes through the same per-key rate limiter as /summarize
+    # (one allowance consumed per ticket), and the same cache. A failure on
+    # one ticket (rate limit or LLM error) is recorded as that item's error
+    # without aborting the rest of the batch.
+    results: list[BatchItemResult] = []
+    for index, text in enumerate(req.texts):
+        try:
+            summary = await _summarize_one(text, "brief", False, api_key)
+            results.append(BatchItemResult(index=index, ok=True, result=summary))
+        except HTTPException as exc:
+            results.append(BatchItemResult(index=index, ok=False, error=str(exc.detail)))
+
+    return BatchResponse(results=results)
