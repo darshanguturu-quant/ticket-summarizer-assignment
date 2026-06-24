@@ -66,7 +66,7 @@ async def summarize(
     if cached is not None:
         return SummarizeResponse(
             summary=cached["summary"],
-            key_points=cached["points"],
+            key_points=cached["key_points"],
             sentiment=cached["sentiment"],
             cached=True,
         )
@@ -76,7 +76,7 @@ async def summarize(
 
     return SummarizeResponse(
         summary=result["summary"],
-        key_points=result["points"],
+        key_points=result["key_points"],
         sentiment=result["sentiment"],
         cached=False,
     )
