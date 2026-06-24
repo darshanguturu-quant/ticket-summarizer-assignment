@@ -14,13 +14,14 @@ class ResponseCache:
         self._lock = threading.Lock()
 
     @staticmethod
-    def _key(text: str) -> str:
-        return hashlib.sha256(text.encode("utf-8")).hexdigest()
+    def _key(text: str, style: str, version: str) -> str:
+        digest_input = f"{version}\x00{style}\x00{text}"
+        return hashlib.sha256(digest_input.encode("utf-8")).hexdigest()
 
-    def get(self, text: str) -> Optional[dict]:
+    def get(self, text: str, style: str, version: str) -> Optional[dict]:
         with self._lock:
-            return self._store.get(self._key(text))
+            return self._store.get(self._key(text, style, version))
 
-    def set(self, text: str, value: dict) -> None:
+    def set(self, text: str, style: str, version: str, value: dict) -> None:
         with self._lock:
-            self._store[self._key(text)] = value
+            self._store[self._key(text, style, version)] = value
