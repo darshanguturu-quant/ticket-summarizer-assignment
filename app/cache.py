@@ -12,7 +12,7 @@ class ResponseCache:
     def __init__(self) -> None:
         self._store: Dict[str, dict] = {}
         self._lock = threading.Lock()
-
+#fixed
     @staticmethod
     def _key(text: str, style: str, version: str) -> str:
         digest_input = f"{version}\x00{style}\x00{text}"
@@ -25,3 +25,4 @@ class ResponseCache:
     def set(self, text: str, style: str, version: str, value: dict) -> None:
         with self._lock:
             self._store[self._key(text, style, version)] = value
+#fixed
