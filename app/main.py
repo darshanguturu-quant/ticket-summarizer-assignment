@@ -59,20 +59,18 @@ async def summarize(
     if not _limiter.allow(api_key):
         raise HTTPException(status_code=429, detail="Rate limit exceeded")
 
-    # TODO(candidate, Part 3): honor req.force_refresh — when it is true, skip
-    # the cache read below and overwrite the stored entry with a fresh summary.
-
-    cached = _cache.get(req.text)
-    if cached is not None:
-        return SummarizeResponse(
-            summary=cached["summary"],
-            key_points=cached["key_points"],
-            sentiment=cached["sentiment"],
-            cached=True,
-        )
+    if not req.force_refresh:
+        cached = _cache.get(req.text, req.style, config.PROMPT_VERSION)
+        if cached is not None:
+            return SummarizeResponse(
+                summary=cached["summary"],
+                key_points=cached["key_points"],
+                sentiment=cached["sentiment"],
+                cached=True,
+            )
 
     result = await _call_llm_with_retries(req.text, req.style)
-    _cache.set(req.text, result)
+    _cache.set(req.text, req.style, config.PROMPT_VERSION, result)
 
     return SummarizeResponse(
         summary=result["summary"],
