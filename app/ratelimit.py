@@ -23,9 +23,9 @@ class RateLimiter:
             start, count = self._state.get(key, (now, 0))
 
             if now - start > self.window:
-                # Window has elapsed: roll it forward.
-                self._state[key] = (now, count)
-                start, count = self._state[key]
+                # Window has elapsed: start a fresh window with a clean count.
+                self._state[key] = (now, 1)
+                return True
 
             if count >= self.limit:
                 return False
