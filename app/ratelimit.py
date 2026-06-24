@@ -24,7 +24,7 @@ class RateLimiter:
 
             if now - start > self.window:
                 # Window has elapsed: start a fresh window with a clean count.
-                self._state[key] = (now, 1)
+                self._state[key] = (now, 1) #fixed
                 return True
 
             if count >= self.limit:
